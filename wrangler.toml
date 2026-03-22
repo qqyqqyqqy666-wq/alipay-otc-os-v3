@@ -1,0 +1,46 @@
+name = "alipay-otc-os-v3"
+main = "src/index.ts"
+compatibility_date = "2025-03-20"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[vars]
+TELEGRAM_ALLOWED_USER_ID = "REPLACE_ME"
+TELEGRAM_WEBHOOK_SECRET = "REPLACE_ME"
+OPS_WEBHOOK_SECRET = "REPLACE_ME"
+ALIPAY_CHANNEL = "ALIPAY"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "alipay-otc-os-v3"
+database_id = "REPLACE_ME"
+
+[[kv_namespaces]]
+binding = "RAW_CACHE"
+id = "REPLACE_ME"
+
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "alipay-otc-os-v3-snapshots"
+
+[[queues.producers]]
+queue = "truth-events"
+binding = "TRUTH_EVENTS_QUEUE"
+
+[[queues.producers]]
+queue = "reconciliation-events"
+binding = "RECON_EVENTS_QUEUE"
+
+[[queues.producers]]
+queue = "shadow-tournament"
+binding = "TOURNAMENT_QUEUE"
+
+[triggers]
+crons = [
+  "0 10 * * *",
+  "30 11 * * *",
+  "0 13 * * *",
+  "0 15 * * *"
+]
