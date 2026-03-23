@@ -47,7 +47,7 @@ export async function loadLatestRegimePosterior(db: D1Database): Promise<RegimeP
   return strictParseRegimePosterior(parsed);
 }
 
-function strictParseObservationFrame(raw: unknown): ObservationFrame {
+export function strictParseObservationFrame(raw: unknown): ObservationFrame {
   if (raw === null || typeof raw !== 'object') {
     throw new Error('MALFORMED_OBSERVATION: root must be an object');
   }
@@ -94,7 +94,7 @@ function strictParseObservationFrame(raw: unknown): ObservationFrame {
   };
 }
 
-function strictParseRegimePosterior(raw: unknown): RegimePosterior {
+export function strictParseRegimePosterior(raw: unknown): RegimePosterior {
   if (raw === null || typeof raw !== 'object') {
     throw new Error('MALFORMED_REGIME: root must be an object');
   }

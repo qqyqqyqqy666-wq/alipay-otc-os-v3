@@ -7,6 +7,7 @@ import type {
 import { renderHelpText } from './interfaces/telegram_commands';
 import { runDecisionPipeline } from './pipeline/decision_pipeline';
 import { loadLatestObservationFrame, loadLatestRegimePosterior } from './pipeline/observation_regime_loader';
+import { writeObservationSnapshot, writeRegimeSnapshot } from './pipeline/snapshot_writer';
 
 async function handleRoot(): Promise<Response> {
   return new Response(JSON.stringify({ status: 'ok', system: 'alipay-otc-os-v3' }), {
@@ -98,6 +99,50 @@ async function loadPortfolioState(env: Env): Promise<EffectivePortfolioState> {
   };
 }
 
+function requireOpsSecret(request: Request, env: Env): boolean {
+  return request.headers.get('x-ops-secret') === env.OPS_WEBHOOK_SECRET;
+}
+
+async function handleWriteObservationSnapshot(request: Request, env: Env): Promise<Response> {
+  if (!requireOpsSecret(request, env)) {
+    return new Response('forbidden', { status: 403 });
+  }
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'INVALID_JSON: request body is not valid JSON' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  const result = await writeObservationSnapshot(env.DB, body);
+  return new Response(JSON.stringify(result), {
+    status: result.written ? 201 : 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}
+
+async function handleWriteRegimeSnapshot(request: Request, env: Env): Promise<Response> {
+  if (!requireOpsSecret(request, env)) {
+    return new Response('forbidden', { status: 403 });
+  }
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'INVALID_JSON: request body is not valid JSON' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  const result = await writeRegimeSnapshot(env.DB, body);
+  return new Response(JSON.stringify(result), {
+    status: result.written ? 201 : 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}
+
 async function handleDecisionPreview(env: Env): Promise<Response> {
   const observation = await loadLatestObservationFrame(env.DB);
   const regime = await loadLatestRegimePosterior(env.DB);
@@ -117,6 +162,12 @@ export default {
     if (url.pathname === '/health') return handleHealth(env);
     if (url.pathname === '/decision/preview' && request.method === 'GET') {
       return handleDecisionPreview(env);
+    }
+    if (url.pathname === '/snapshots/observation' && request.method === 'POST') {
+      return handleWriteObservationSnapshot(request, env);
+    }
+    if (url.pathname === '/snapshots/regime' && request.method === 'POST') {
+      return handleWriteRegimeSnapshot(request, env);
     }
     if (url.pathname === '/webhook/telegram' && request.method === 'POST') {
       return handleTelegramWebhook(request, env);
