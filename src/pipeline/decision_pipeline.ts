@@ -63,6 +63,19 @@ export function runDecisionPipeline(
 const PREVIEW_BUCKETS = ['GOLD', 'CN_CORE', 'QDII'] as const;
 type PreviewBucket = 'GOLD' | 'CN_CORE' | 'QDII';
 
+// Explicit staleness thresholds. All values in minutes.
+const OBSERVATION_STALE_MINUTES = 60;    // market snapshot must be within 1 hour
+const REGIME_STALE_MINUTES = 1440;       // regime posterior valid for 24 hours
+const DYNAMIC_TRUTH_STALE_MINUTES = 60; // subscription/NAV status must be within 1 hour
+
+function ageMinutes(isoTimestamp: string, nowMs: number): number {
+  return (nowMs - new Date(isoTimestamp).getTime()) / 60_000;
+}
+
+function freshnessStatus(ageMin: number, thresholdMin: number): 'FRESH' | 'STALE' {
+  return ageMin <= thresholdMin ? 'FRESH' : 'STALE';
+}
+
 export interface PreviewResponse {
   generated_at: string;
   inputs_summary: {
@@ -105,6 +118,13 @@ export interface PreviewResponse {
     missing_dynamic_truth_buckets: PreviewBucket[];
     missing_static_truth_buckets: PreviewBucket[];
     conservative_channel_blocked_buckets: PreviewBucket[];
+    stale_dynamic_truth_buckets: PreviewBucket[];
+  };
+  freshness_summary: {
+    observation: { as_of: string; age_minutes: number; threshold_minutes: number; status: 'FRESH' | 'STALE' };
+    regime: { as_of: string; age_minutes: number; threshold_minutes: number; status: 'FRESH' | 'STALE' };
+    dynamic_truth_by_bucket: Partial<Record<PreviewBucket, { as_of: string; age_minutes: number; threshold_minutes: number; status: 'FRESH' | 'STALE' }>>;
+    any_global_stale: boolean;
   };
 }
 
@@ -142,6 +162,32 @@ export function buildPreviewResponse(
     .filter((f) => f.channel_blocked && f.dynamic_truth_source === 'MISSING')
     .map((f) => f.bucket as PreviewBucket);
 
+  const nowMs = Date.now();
+
+  const obsAgeMin = ageMinutes(observation.as_of, nowMs);
+  const regimeAgeMin = ageMinutes(regime.as_of, nowMs);
+
+  const dynamicTruthFreshness: Partial<Record<PreviewBucket, { as_of: string; age_minutes: number; threshold_minutes: number; status: 'FRESH' | 'STALE' }>> = {};
+  for (const b of PREVIEW_BUCKETS) {
+    const dt = dynamicTruthByBucket[b];
+    if (dt != null) {
+      const ageMin = ageMinutes(dt.as_of, nowMs);
+      dynamicTruthFreshness[b] = {
+        as_of: dt.as_of,
+        age_minutes: Math.round(ageMin),
+        threshold_minutes: DYNAMIC_TRUTH_STALE_MINUTES,
+        status: freshnessStatus(ageMin, DYNAMIC_TRUTH_STALE_MINUTES)
+      };
+    }
+  }
+
+  const staleDynamicBuckets = PREVIEW_BUCKETS.filter(
+    (b) => dynamicTruthFreshness[b]?.status === 'STALE'
+  );
+
+  const obsStatus = freshnessStatus(obsAgeMin, OBSERVATION_STALE_MINUTES);
+  const regimeStatus = freshnessStatus(regimeAgeMin, REGIME_STALE_MINUTES);
+
   return {
     generated_at: new Date().toISOString(),
     inputs_summary: {
@@ -172,7 +218,24 @@ export function buildPreviewResponse(
     degraded_summary: {
       missing_dynamic_truth_buckets: missingDynamic,
       missing_static_truth_buckets: missingStatic,
-      conservative_channel_blocked_buckets: conservativeChannelBlocked
+      conservative_channel_blocked_buckets: conservativeChannelBlocked,
+      stale_dynamic_truth_buckets: staleDynamicBuckets
+    },
+    freshness_summary: {
+      observation: {
+        as_of: observation.as_of,
+        age_minutes: Math.round(obsAgeMin),
+        threshold_minutes: OBSERVATION_STALE_MINUTES,
+        status: obsStatus
+      },
+      regime: {
+        as_of: regime.as_of,
+        age_minutes: Math.round(regimeAgeMin),
+        threshold_minutes: REGIME_STALE_MINUTES,
+        status: regimeStatus
+      },
+      dynamic_truth_by_bucket: dynamicTruthFreshness,
+      any_global_stale: obsStatus === 'STALE' || regimeStatus === 'STALE'
     }
   };
 }
