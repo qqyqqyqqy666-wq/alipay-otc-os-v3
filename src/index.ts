@@ -166,7 +166,7 @@ async function handleWriteRegimeSnapshot(request: Request, env: Env): Promise<Re
 
 async function loadStaticTruthByBucket(env: Env): Promise<Partial<Record<'GOLD' | 'CN_CORE' | 'QDII', InstrumentStaticTruth>>> {
   const rows = await env.DB
-    .prepare("SELECT instrument_id, fund_code, fund_name, asset_bucket, asset_subtype, fund_company, risk_level, currency, is_qdii, default_buy_confirm_days, default_redeem_confirm_days, default_cash_arrival_days, default_min_hold_days, default_fee_schedule_json, is_active FROM instrument_static_truth WHERE asset_bucket IN ('GOLD', 'CN_CORE', 'QDII') AND is_active = 1")
+    .prepare("SELECT instrument_id, fund_code, fund_name, asset_bucket, asset_subtype, fund_company, risk_level, currency, is_qdii, default_buy_confirm_days, default_redeem_confirm_days, default_cash_arrival_days, default_min_hold_days, default_fee_schedule_json, is_active, updated_at FROM instrument_static_truth WHERE asset_bucket IN ('GOLD', 'CN_CORE', 'QDII') AND is_active = 1")
     .all<{
       instrument_id: string;
       fund_code: string;
@@ -183,6 +183,7 @@ async function loadStaticTruthByBucket(env: Env): Promise<Partial<Record<'GOLD' 
       default_min_hold_days: number;
       default_fee_schedule_json: string;
       is_active: number;
+      updated_at: string;
     }>();
 
   const result: Partial<Record<'GOLD' | 'CN_CORE' | 'QDII', InstrumentStaticTruth>> = {};
@@ -204,7 +205,8 @@ async function loadStaticTruthByBucket(env: Env): Promise<Partial<Record<'GOLD' 
         default_cash_arrival_days: r.default_cash_arrival_days,
         default_min_hold_days: r.default_min_hold_days,
         default_fee_schedule_json: r.default_fee_schedule_json,
-        is_active: Boolean(r.is_active)
+        is_active: Boolean(r.is_active),
+        updated_at: r.updated_at
       };
     }
   }

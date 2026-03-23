@@ -163,6 +163,10 @@ export interface PreviewResponse {
     // Format: "GOLD=<as_of>|CN_CORE=<as_of>|QDII=<as_of>", MISSING when bucket absent.
     // Stable ordering matches PREVIEW_BUCKETS. Used as part of the dedupe key.
     dynamic_truth_signature: string;
+    // Canonical signature of the static truth rows used by this preview.
+    // Format: "GOLD=<updated_at>|CN_CORE=<updated_at>|QDII=<updated_at>", MISSING when bucket absent.
+    // Stable ordering matches PREVIEW_BUCKETS. Used as part of the dedupe key.
+    static_truth_signature: string;
   };
   signal_summary: Array<{
     bucket: string;
@@ -246,6 +250,9 @@ export function buildPreviewResponse(
   // Deterministic signature: fixed PREVIEW_BUCKETS order, MISSING when absent.
   const dynamic_truth_signature = PREVIEW_BUCKETS
     .map((b) => `${b}=${dynamicTruthByBucket[b]?.as_of ?? 'MISSING'}`)
+    .join('|');
+  const static_truth_signature = PREVIEW_BUCKETS
+    .map((b) => `${b}=${staticTruthByBucket[b]?.updated_at ?? 'MISSING'}`)
     .join('|');
 
   const friction_summary = result.signals.map((signal, i) => {
@@ -356,7 +363,8 @@ export function buildPreviewResponse(
       channel: observation.channel,
       dynamic_truth_loaded_buckets: dynamicLoadedBuckets,
       static_truth_loaded_buckets: staticLoadedBuckets,
-      dynamic_truth_signature
+      dynamic_truth_signature,
+      static_truth_signature
     },
     signal_summary: result.signals.map((s) => ({
       bucket: s.bucket_id,

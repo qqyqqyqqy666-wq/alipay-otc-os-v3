@@ -239,6 +239,7 @@ CREATE TABLE IF NOT EXISTS decision_preview_snapshots (
   regime_as_of            TEXT NOT NULL,
   portfolio_as_of         TEXT NOT NULL,
   dynamic_truth_signature TEXT NOT NULL,  -- canonical GOLD=<as_of>|CN_CORE=<as_of>|QDII=<as_of>, MISSING when absent
+  static_truth_signature  TEXT NOT NULL,  -- canonical GOLD=<updated_at>|CN_CORE=<updated_at>|QDII=<updated_at>, MISSING when absent
   primary_status          TEXT NOT NULL,  -- ACTIONABLE | HOLD | DEGRADED | BLOCKED
   top_reason_code         TEXT NOT NULL,  -- PreviewHealthCode string
   selected_bucket         TEXT,           -- NULL when DEGRADED or BLOCKED
@@ -248,4 +249,4 @@ CREATE TABLE IF NOT EXISTS decision_preview_snapshots (
   created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_decision_preview_snapshots_inputs
-  ON decision_preview_snapshots(observation_as_of, regime_as_of, portfolio_as_of, channel, dynamic_truth_signature);
+  ON decision_preview_snapshots(observation_as_of, regime_as_of, portfolio_as_of, channel, dynamic_truth_signature, static_truth_signature);
