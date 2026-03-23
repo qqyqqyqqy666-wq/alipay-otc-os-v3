@@ -124,6 +124,7 @@ export interface InstrumentStaticTruth {
   default_min_hold_days: number;
   default_fee_schedule_json: string;
   is_active: boolean;
+  updated_at: ISODateTime;
 }
 
 export interface InstrumentDynamicTruth {

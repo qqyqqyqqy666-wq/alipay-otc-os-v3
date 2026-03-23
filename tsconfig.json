@@ -4,7 +4,10 @@
     "module": "ES2022",
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "WebWorker"],
-    "types": ["@cloudflare/workers-types"],
+    "baseUrl": ".",
+    "paths": {
+      "@cloudflare/workers-types": ["node_modules/@cloudflare/workers-types/@cloudflare/workers-types/index.ts"]
+    },
     "strict": true,
     "noEmit": false,
     "outDir": "dist",

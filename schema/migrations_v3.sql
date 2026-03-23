@@ -211,3 +211,42 @@ CREATE TABLE IF NOT EXISTS system_health_log (
   created_at TEXT NOT NULL,
   UNIQUE(as_of)
 );
+
+CREATE TABLE IF NOT EXISTS market_observation_snapshots (
+  snapshot_id TEXT PRIMARY KEY,
+  as_of TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  observation_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(as_of, channel)
+);
+CREATE INDEX IF NOT EXISTS idx_obs_snapshots_as_of ON market_observation_snapshots(as_of DESC);
+
+CREATE TABLE IF NOT EXISTS regime_snapshots (
+  snapshot_id TEXT PRIMARY KEY,
+  as_of TEXT NOT NULL,
+  regime_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(as_of)
+);
+CREATE INDEX IF NOT EXISTS idx_regime_snapshots_as_of ON regime_snapshots(as_of DESC);
+
+CREATE TABLE IF NOT EXISTS decision_preview_snapshots (
+  snapshot_id             TEXT NOT NULL PRIMARY KEY,
+  generated_at            TEXT NOT NULL,
+  channel                 TEXT NOT NULL,
+  observation_as_of       TEXT NOT NULL,
+  regime_as_of            TEXT NOT NULL,
+  portfolio_as_of         TEXT NOT NULL,
+  dynamic_truth_signature TEXT NOT NULL,  -- canonical GOLD=<as_of>|CN_CORE=<as_of>|QDII=<as_of>, MISSING when absent
+  static_truth_signature  TEXT NOT NULL,  -- canonical GOLD=<updated_at>|CN_CORE=<updated_at>|QDII=<updated_at>, MISSING when absent
+  primary_status          TEXT NOT NULL,  -- ACTIONABLE | HOLD | DEGRADED | BLOCKED
+  top_reason_code         TEXT NOT NULL,  -- PreviewHealthCode string
+  selected_bucket         TEXT,           -- NULL when DEGRADED or BLOCKED
+  selected_action         TEXT,           -- NULL when DEGRADED or BLOCKED
+  net_edge_after_friction REAL,           -- NULL when DEGRADED or BLOCKED
+  preview_json            TEXT NOT NULL,  -- full PreviewResponse as JSON
+  created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_decision_preview_snapshots_inputs
+  ON decision_preview_snapshots(observation_as_of, regime_as_of, portfolio_as_of, channel, dynamic_truth_signature, static_truth_signature);
