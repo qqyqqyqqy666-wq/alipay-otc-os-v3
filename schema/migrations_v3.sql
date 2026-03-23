@@ -211,3 +211,20 @@ CREATE TABLE IF NOT EXISTS system_health_log (
   created_at TEXT NOT NULL,
   UNIQUE(as_of)
 );
+
+CREATE TABLE IF NOT EXISTS market_observation_snapshots (
+  snapshot_id TEXT PRIMARY KEY,
+  as_of TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  observation_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_obs_snapshots_as_of ON market_observation_snapshots(as_of DESC);
+
+CREATE TABLE IF NOT EXISTS regime_snapshots (
+  snapshot_id TEXT PRIMARY KEY,
+  as_of TEXT NOT NULL,
+  regime_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_regime_snapshots_as_of ON regime_snapshots(as_of DESC);
