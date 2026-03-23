@@ -230,3 +230,21 @@ CREATE TABLE IF NOT EXISTS regime_snapshots (
   UNIQUE(as_of)
 );
 CREATE INDEX IF NOT EXISTS idx_regime_snapshots_as_of ON regime_snapshots(as_of DESC);
+
+CREATE TABLE IF NOT EXISTS decision_preview_snapshots (
+  snapshot_id             TEXT NOT NULL PRIMARY KEY,
+  generated_at            TEXT NOT NULL,
+  channel                 TEXT NOT NULL,
+  observation_as_of       TEXT NOT NULL,
+  regime_as_of            TEXT NOT NULL,
+  portfolio_as_of         TEXT NOT NULL,
+  primary_status          TEXT NOT NULL,  -- ACTIONABLE | HOLD | DEGRADED | BLOCKED
+  top_reason_code         TEXT NOT NULL,  -- PreviewHealthCode string
+  selected_bucket         TEXT,           -- NULL when DEGRADED or BLOCKED
+  selected_action         TEXT,           -- NULL when DEGRADED or BLOCKED
+  net_edge_after_friction REAL,           -- NULL when DEGRADED or BLOCKED
+  preview_json            TEXT NOT NULL,  -- full PreviewResponse as JSON
+  created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_decision_preview_snapshots_inputs
+  ON decision_preview_snapshots(observation_as_of, regime_as_of, portfolio_as_of, channel);

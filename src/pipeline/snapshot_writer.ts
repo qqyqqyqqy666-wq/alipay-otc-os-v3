@@ -1,4 +1,5 @@
 import type { D1Database } from '@cloudflare/workers-types';
+import type { PreviewResponse } from './decision_pipeline';
 import {
   strictParseObservationFrame,
   strictParseRegimePosterior
@@ -64,4 +65,61 @@ export async function writeRegimeSnapshot(
     .run();
 
   return { snapshot_id, as_of: posterior.as_of, written: result.meta.changes > 0 };
+}
+
+export interface PreviewSnapshotWriteResult {
+  snapshot_id: string;
+  /** true = row inserted; false = duplicate (same observation/regime/portfolio/channel, row ignored) */
+  written: boolean;
+}
+
+/**
+ * Persists the fully-built PreviewResponse into decision_preview_snapshots.
+ *
+ * Idempotency: INSERT OR IGNORE on UNIQUE(observation_as_of, regime_as_of, portfolio_as_of, channel).
+ * A duplicate preview run with the same input timestamps is silently ignored;
+ * written=false is returned so callers can distinguish new from duplicate writes.
+ *
+ * Throws with code PREVIEW_SNAPSHOT_WRITE_FAILED on D1 error.
+ */
+export async function writePreviewSnapshot(
+  db: D1Database,
+  preview: PreviewResponse
+): Promise<PreviewSnapshotWriteResult> {
+  const snapshot_id = crypto.randomUUID();
+  const rec = preview.primary_recommendation;
+
+  let result: { meta: { changes: number } };
+  try {
+    result = await db
+      .prepare(
+        `INSERT OR IGNORE INTO decision_preview_snapshots
+          (snapshot_id, generated_at, channel, observation_as_of, regime_as_of, portfolio_as_of,
+           primary_status, top_reason_code, selected_bucket, selected_action,
+           net_edge_after_friction, preview_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        snapshot_id,
+        preview.generated_at,
+        preview.inputs_summary.channel,
+        preview.inputs_summary.observation_as_of,
+        preview.inputs_summary.regime_as_of,
+        preview.inputs_summary.portfolio_as_of,
+        rec.status,
+        rec.top_reason_code,
+        rec.selected_bucket ?? null,
+        rec.selected_action ?? null,
+        rec.net_edge_after_friction ?? null,
+        JSON.stringify(preview)
+      )
+      .run();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw Object.assign(new Error(`PREVIEW_SNAPSHOT_WRITE_FAILED: ${msg}`), {
+      code: 'PREVIEW_SNAPSHOT_WRITE_FAILED'
+    });
+  }
+
+  return { snapshot_id, written: result.meta.changes > 0 };
 }
