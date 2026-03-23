@@ -1,5 +1,5 @@
 import type { D1Database } from '@cloudflare/workers-types';
-import type { PreviewResponse } from './decision_pipeline';
+import type { PreviewAuditBundle, PreviewResponse } from './decision_pipeline';
 
 // Raw row shape returned by D1 for decision_preview_snapshots
 interface PreviewSnapshotRow {
@@ -10,6 +10,7 @@ interface PreviewSnapshotRow {
   regime_as_of: string;
   portfolio_as_of: string;
   dynamic_truth_signature: string;
+  static_truth_signature: string;
   primary_status: string;
   top_reason_code: string;
   selected_bucket: string | null;
@@ -28,6 +29,7 @@ export interface PreviewSnapshotRecord {
   regime_as_of: string;
   portfolio_as_of: string;
   dynamic_truth_signature: string;
+  static_truth_signature: string;
   primary_status: string;
   top_reason_code: string;
   selected_bucket: string | null;
@@ -44,6 +46,21 @@ export interface ByInputParams {
   portfolio_as_of: string;
   channel: string;
   dynamic_truth_signature: string;
+  static_truth_signature: string;
+}
+
+/**
+ * Returns a PreviewResponse with the audit_bundle overridden to reflect replay provenance.
+ * The decision outputs (signals, friction, plans, health, recommendation) are verbatim from storage.
+ */
+export function withReplayAuditBundle(record: PreviewSnapshotRecord): PreviewResponse {
+  const replayBundle: PreviewAuditBundle = {
+    ...record.preview.audit_bundle,
+    source: 'REPLAY',
+    snapshot_id: record.snapshot_id,
+    snapshot_persisted_at: record.created_at
+  };
+  return { ...record.preview, audit_bundle: replayBundle };
 }
 
 function parseRow(row: PreviewSnapshotRow): PreviewSnapshotRecord {
@@ -99,7 +116,7 @@ export async function readPreviewSnapshotByInput(
     .prepare(
       `SELECT * FROM decision_preview_snapshots
        WHERE observation_as_of = ? AND regime_as_of = ? AND portfolio_as_of = ?
-         AND channel = ? AND dynamic_truth_signature = ?
+         AND channel = ? AND dynamic_truth_signature = ? AND static_truth_signature = ?
        LIMIT 1`
     )
     .bind(
@@ -107,7 +124,8 @@ export async function readPreviewSnapshotByInput(
       params.regime_as_of,
       params.portfolio_as_of,
       params.channel,
-      params.dynamic_truth_signature
+      params.dynamic_truth_signature,
+      params.static_truth_signature
     )
     .first<PreviewSnapshotRow>();
 

@@ -150,6 +150,40 @@ function highestPriorityCode(codes: PreviewHealthCode[]): PreviewHealthCode {
 
 export type PreviewRecommendationStatus = 'ACTIONABLE' | 'HOLD' | 'DEGRADED' | 'BLOCKED';
 
+// Canonical top-level audit bundle. Exposed on every live and replay response.
+// source='LIVE': snapshot_id/snapshot_persisted_at are null (persist happens after response build).
+// source='REPLAY': snapshot_id/snapshot_persisted_at come from the persisted row.
+export interface PreviewAuditBundle {
+  source: 'LIVE' | 'REPLAY';
+  snapshot_id: string | null;
+  snapshot_persisted_at: string | null;
+  provenance: {
+    observation_as_of: string;
+    regime_as_of: string;
+    portfolio_as_of: string;
+    channel: string;
+    dynamic_truth_signature: string;
+    static_truth_signature: string;
+  };
+  freshness: {
+    observation_status: 'FRESH' | 'STALE';
+    regime_status: 'FRESH' | 'STALE';
+    any_global_stale: boolean;
+  };
+  health: {
+    is_actionable: boolean;
+    any_degraded: boolean;
+    any_blocked: boolean;
+    top_blocking_reason: PreviewHealthCode;
+  };
+  recommendation: {
+    status: PreviewRecommendationStatus;
+    selected_bucket: string | null;
+    selected_action: string | null;
+    top_reason_code: PreviewHealthCode;
+  };
+}
+
 export interface PreviewResponse {
   generated_at: string;
   inputs_summary: {
@@ -222,6 +256,9 @@ export interface PreviewResponse {
       top_blocking_reason: PreviewHealthCode;
     }>;
   };
+  // Canonical audit bundle. Read this first for provenance, health, and recommendation.
+  // source='LIVE' on fresh generation; source='REPLAY' when returned from a stored snapshot.
+  audit_bundle: PreviewAuditBundle;
   // Single top-level conclusion. Callers should read this first.
   primary_recommendation: {
     // ACTIONABLE  – a real trade (BUY/REDEEM/SWITCH) is ready to submit
@@ -354,8 +391,40 @@ export function buildPreviewResponse(
     };
   }
 
+  const audit_bundle: PreviewAuditBundle = {
+    source: 'LIVE',
+    snapshot_id: null,
+    snapshot_persisted_at: null,
+    provenance: {
+      observation_as_of: observation.as_of,
+      regime_as_of: regime.as_of,
+      portfolio_as_of: portfolio.as_of,
+      channel: observation.channel,
+      dynamic_truth_signature,
+      static_truth_signature
+    },
+    freshness: {
+      observation_status: obsStatus,
+      regime_status: regimeStatus,
+      any_global_stale: obsStatus === 'STALE' || regimeStatus === 'STALE'
+    },
+    health: {
+      is_actionable: globalTopCode === 'ACTIONABLE',
+      any_degraded: bucketHealthEntries.some((e) => e.is_degraded),
+      any_blocked: bucketHealthEntries.some((e) => !e.is_actionable && !e.is_degraded),
+      top_blocking_reason: globalTopCode
+    },
+    recommendation: {
+      status: primary_recommendation.status,
+      selected_bucket: primary_recommendation.selected_bucket,
+      selected_action: primary_recommendation.selected_action,
+      top_reason_code: primary_recommendation.top_reason_code
+    }
+  };
+
   return {
     generated_at: new Date().toISOString(),
+    audit_bundle,
     inputs_summary: {
       observation_as_of: observation.as_of,
       regime_as_of: regime.as_of,

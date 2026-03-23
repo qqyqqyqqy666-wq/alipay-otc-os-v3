@@ -10,7 +10,7 @@ import { renderHelpText } from './interfaces/telegram_commands';
 import { buildPreviewResponse, runDecisionPipeline } from './pipeline/decision_pipeline';
 import { loadDynamicTruthByBucket, loadLatestObservationFrame, loadLatestRegimePosterior } from './pipeline/observation_regime_loader';
 import { writeObservationSnapshot, writeRegimeSnapshot, writePreviewSnapshot } from './pipeline/snapshot_writer';
-import { readLatestPreviewSnapshot, readPreviewSnapshotByInput } from './pipeline/snapshot_reader';
+import { readLatestPreviewSnapshot, readPreviewSnapshotByInput, withReplayAuditBundle } from './pipeline/snapshot_reader';
 
 async function handleRoot(): Promise<Response> {
   return new Response(JSON.stringify({ status: 'ok', system: 'alipay-otc-os-v3' }), {
@@ -240,35 +240,32 @@ async function handleLatestPreviewSnapshot(request: Request, env: Env): Promise<
   if (record == null) {
     return new Response(JSON.stringify({ error: 'PREVIEW_SNAPSHOT_NOT_FOUND' }), { status: 404, headers: JSON_HEADERS });
   }
-  return new Response(JSON.stringify({ replay: true, ...record }), { headers: JSON_HEADERS });
+  return new Response(JSON.stringify(withReplayAuditBundle(record)), { headers: JSON_HEADERS });
 }
 
 // GET /decision/preview-snapshots/by-input
-// Required query params: observation_as_of, regime_as_of, portfolio_as_of, channel, dynamic_truth_signature
+// Required query params: observation_as_of, regime_as_of, portfolio_as_of, channel,
+//   dynamic_truth_signature, static_truth_signature
 // Returns the exact persisted snapshot matching the unique input key (replay, not live recomputation).
 async function handlePreviewSnapshotByInput(request: Request, env: Env): Promise<Response> {
   const p = new URL(request.url).searchParams;
-  const observation_as_of = p.get('observation_as_of');
-  const regime_as_of = p.get('regime_as_of');
-  const portfolio_as_of = p.get('portfolio_as_of');
-  const channel = p.get('channel');
-  const dynamic_truth_signature = p.get('dynamic_truth_signature');
-  const missing = ['observation_as_of', 'regime_as_of', 'portfolio_as_of', 'channel', 'dynamic_truth_signature']
-    .filter((k) => p.get(k) == null);
+  const missing = ['observation_as_of', 'regime_as_of', 'portfolio_as_of', 'channel',
+    'dynamic_truth_signature', 'static_truth_signature'].filter((k) => p.get(k) == null);
   if (missing.length > 0) {
     return new Response(JSON.stringify({ error: 'MISSING_PARAMS', missing }), { status: 400, headers: JSON_HEADERS });
   }
   const record = await readPreviewSnapshotByInput(env.DB, {
-    observation_as_of: observation_as_of!,
-    regime_as_of: regime_as_of!,
-    portfolio_as_of: portfolio_as_of!,
-    channel: channel!,
-    dynamic_truth_signature: dynamic_truth_signature!
+    observation_as_of: p.get('observation_as_of')!,
+    regime_as_of: p.get('regime_as_of')!,
+    portfolio_as_of: p.get('portfolio_as_of')!,
+    channel: p.get('channel')!,
+    dynamic_truth_signature: p.get('dynamic_truth_signature')!,
+    static_truth_signature: p.get('static_truth_signature')!
   });
   if (record == null) {
     return new Response(JSON.stringify({ error: 'PREVIEW_SNAPSHOT_NOT_FOUND' }), { status: 404, headers: JSON_HEADERS });
   }
-  return new Response(JSON.stringify({ replay: true, ...record }), { headers: JSON_HEADERS });
+  return new Response(JSON.stringify(withReplayAuditBundle(record)), { headers: JSON_HEADERS });
 }
 
 export default {
