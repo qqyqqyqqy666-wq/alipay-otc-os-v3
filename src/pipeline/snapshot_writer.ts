@@ -95,9 +95,9 @@ export async function writePreviewSnapshot(
       .prepare(
         `INSERT OR IGNORE INTO decision_preview_snapshots
           (snapshot_id, generated_at, channel, observation_as_of, regime_as_of, portfolio_as_of,
-           primary_status, top_reason_code, selected_bucket, selected_action,
+           dynamic_truth_signature, primary_status, top_reason_code, selected_bucket, selected_action,
            net_edge_after_friction, preview_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         snapshot_id,
@@ -106,6 +106,7 @@ export async function writePreviewSnapshot(
         preview.inputs_summary.observation_as_of,
         preview.inputs_summary.regime_as_of,
         preview.inputs_summary.portfolio_as_of,
+        preview.inputs_summary.dynamic_truth_signature,
         rec.status,
         rec.top_reason_code,
         rec.selected_bucket ?? null,
