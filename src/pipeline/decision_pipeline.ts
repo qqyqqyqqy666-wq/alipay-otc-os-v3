@@ -45,7 +45,9 @@ export function runDecisionPipeline(
         instrumentFrom: null,
         instrumentTo: null,
         netEdgeAfterFriction: verdict.net_edge_after_friction,
-        blockedReason: verdict.forced_action ? verdict.verdict_reason : null
+        blockedReason: verdict.forced_action ? verdict.verdict_reason : null,
+        thesisCode: signal.thesis_code,
+        signalDirection: signal.direction
       },
       verdict
     );

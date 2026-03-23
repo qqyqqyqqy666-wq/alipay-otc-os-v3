@@ -8,6 +8,19 @@ import { estimateRedemptionFeePct } from './fee_engine';
 import { estimateDelayCostPct } from './timing_engine';
 import { isChannelBlocked } from './channel_rules';
 
+function deriveVerdictReasonCode(
+  channelBlocked: boolean,
+  statusBlocked: boolean,
+  minHoldBlocked: boolean,
+  netEdge: number
+): string {
+  if (channelBlocked) return 'BLOCKED_CHANNEL';
+  if (statusBlocked) return 'BLOCKED_STATUS_CONFLICT';
+  if (minHoldBlocked) return 'BLOCKED_MIN_HOLD';
+  if (netEdge <= 0) return 'BLOCKED_NEGATIVE_EDGE';
+  return 'EXECUTABLE';
+}
+
 export function evaluateFriction(
   signal: SignalCandidate,
   portfolio: EffectivePortfolioState,
@@ -40,6 +53,6 @@ export function evaluateFriction(
     min_hold_blocked: minHoldBlocked,
     status_blocked: Boolean(statusBlocked),
     net_edge_after_friction: netEdgeAfterFriction,
-    verdict_reason: forcedAction === null ? 'Executable under current placeholder friction policy.' : 'Blocked by placeholder friction constraints.'
+    verdict_reason: deriveVerdictReasonCode(channelBlocked, Boolean(statusBlocked), minHoldBlocked, netEdgeAfterFriction)
   };
 }

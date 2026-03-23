@@ -1,4 +1,4 @@
-import type { AssetBucket, ISODateTime, UUID } from './domain';
+import type { AssetBucket, Direction, ISODateTime, UUID } from './domain';
 
 export interface TruthUpdateInput {
   instrumentId: UUID;
@@ -13,6 +13,8 @@ export interface PlannerInput {
   instrumentTo: UUID | null;
   netEdgeAfterFriction: number;
   blockedReason: string | null;
+  thesisCode: string;
+  signalDirection: Direction;
 }
 
 export interface QueueMessage<TPayload extends Record<string, unknown>> {
