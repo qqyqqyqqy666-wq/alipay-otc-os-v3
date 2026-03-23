@@ -7,6 +7,7 @@ import type {
   PendingTradeState
 } from './core/types/domain';
 import { renderHelpText } from './interfaces/telegram_commands';
+import type { PreviewResponse } from './pipeline/decision_pipeline';
 import { buildPreviewResponse, runDecisionPipeline } from './pipeline/decision_pipeline';
 import { loadDynamicTruthByBucket, loadLatestObservationFrame, loadLatestRegimePosterior } from './pipeline/observation_regime_loader';
 import { writeObservationSnapshot, writeRegimeSnapshot, writePreviewSnapshot } from './pipeline/snapshot_writer';
@@ -223,9 +224,19 @@ async function handleDecisionPreview(env: Env): Promise<Response> {
   const result = runDecisionPipeline(observation, regime, portfolio, dynamicTruthByBucket, staticTruthByBucket);
   const preview = buildPreviewResponse(result, observation, regime, portfolio, dynamicTruthByBucket, staticTruthByBucket);
 
-  await writePreviewSnapshot(env.DB, preview);
+  const persistResult = await writePreviewSnapshot(env.DB, preview);
 
-  return new Response(JSON.stringify(preview), {
+  // Patch audit_bundle with the actual persisted snapshot identity now that it is known.
+  const livePreview: PreviewResponse = {
+    ...preview,
+    audit_bundle: {
+      ...preview.audit_bundle,
+      snapshot_id: persistResult.snapshot_id,
+      snapshot_persisted_at: persistResult.created_at
+    }
+  };
+
+  return new Response(JSON.stringify(livePreview), {
     headers: { 'content-type': 'application/json' }
   });
 }

@@ -69,16 +69,18 @@ export async function writeRegimeSnapshot(
 
 export interface PreviewSnapshotWriteResult {
   snapshot_id: string;
-  /** true = row inserted; false = duplicate (same observation/regime/portfolio/channel, row ignored) */
+  created_at: string;
+  /** true = row inserted; false = duplicate (same unique input key, existing row returned) */
   written: boolean;
 }
 
 /**
  * Persists the fully-built PreviewResponse into decision_preview_snapshots.
  *
- * Idempotency: INSERT OR IGNORE on UNIQUE(observation_as_of, regime_as_of, portfolio_as_of, channel).
- * A duplicate preview run with the same input timestamps is silently ignored;
- * written=false is returned so callers can distinguish new from duplicate writes.
+ * Idempotency: INSERT OR IGNORE on UNIQUE(observation_as_of, regime_as_of, portfolio_as_of,
+ * channel, dynamic_truth_signature, static_truth_signature).
+ * On duplicate (written=false) the existing row's snapshot_id and created_at are fetched
+ * and returned so the caller can always point to the actual persisted identity.
  *
  * Throws with code PREVIEW_SNAPSHOT_WRITE_FAILED on D1 error.
  */
@@ -87,7 +89,9 @@ export async function writePreviewSnapshot(
   preview: PreviewResponse
 ): Promise<PreviewSnapshotWriteResult> {
   const snapshot_id = crypto.randomUUID();
+  const created_at = new Date().toISOString();
   const rec = preview.primary_recommendation;
+  const inp = preview.inputs_summary;
 
   let result: { meta: { changes: number } };
   try {
@@ -96,24 +100,25 @@ export async function writePreviewSnapshot(
         `INSERT OR IGNORE INTO decision_preview_snapshots
           (snapshot_id, generated_at, channel, observation_as_of, regime_as_of, portfolio_as_of,
            dynamic_truth_signature, static_truth_signature, primary_status, top_reason_code,
-           selected_bucket, selected_action, net_edge_after_friction, preview_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           selected_bucket, selected_action, net_edge_after_friction, preview_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         snapshot_id,
         preview.generated_at,
-        preview.inputs_summary.channel,
-        preview.inputs_summary.observation_as_of,
-        preview.inputs_summary.regime_as_of,
-        preview.inputs_summary.portfolio_as_of,
-        preview.inputs_summary.dynamic_truth_signature,
-        preview.inputs_summary.static_truth_signature,
+        inp.channel,
+        inp.observation_as_of,
+        inp.regime_as_of,
+        inp.portfolio_as_of,
+        inp.dynamic_truth_signature,
+        inp.static_truth_signature,
         rec.status,
         rec.top_reason_code,
         rec.selected_bucket ?? null,
         rec.selected_action ?? null,
         rec.net_edge_after_friction ?? null,
-        JSON.stringify(preview)
+        JSON.stringify(preview),
+        created_at
       )
       .run();
   } catch (err) {
@@ -123,5 +128,34 @@ export async function writePreviewSnapshot(
     });
   }
 
-  return { snapshot_id, written: result.meta.changes > 0 };
+  if (result.meta.changes > 0) {
+    return { snapshot_id, created_at, written: true };
+  }
+
+  // Duplicate row: fetch the actual stored identity so the caller can reference it correctly.
+  const existing = await db
+    .prepare(
+      `SELECT snapshot_id, created_at FROM decision_preview_snapshots
+       WHERE observation_as_of = ? AND regime_as_of = ? AND portfolio_as_of = ?
+         AND channel = ? AND dynamic_truth_signature = ? AND static_truth_signature = ?
+       LIMIT 1`
+    )
+    .bind(
+      inp.observation_as_of,
+      inp.regime_as_of,
+      inp.portfolio_as_of,
+      inp.channel,
+      inp.dynamic_truth_signature,
+      inp.static_truth_signature
+    )
+    .first<{ snapshot_id: string; created_at: string }>();
+
+  if (existing == null) {
+    throw Object.assign(
+      new Error('PREVIEW_SNAPSHOT_WRITE_FAILED: duplicate row not found after INSERT OR IGNORE'),
+      { code: 'PREVIEW_SNAPSHOT_WRITE_FAILED' }
+    );
+  }
+
+  return { snapshot_id: existing.snapshot_id, created_at: existing.created_at, written: false };
 }
