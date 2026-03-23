@@ -7,7 +7,7 @@ import type {
   PendingTradeState
 } from './core/types/domain';
 import { renderHelpText } from './interfaces/telegram_commands';
-import { runDecisionPipeline } from './pipeline/decision_pipeline';
+import { buildPreviewResponse, runDecisionPipeline } from './pipeline/decision_pipeline';
 import { loadDynamicTruthByBucket, loadLatestObservationFrame, loadLatestRegimePosterior } from './pipeline/observation_regime_loader';
 import { writeObservationSnapshot, writeRegimeSnapshot } from './pipeline/snapshot_writer';
 
@@ -218,8 +218,9 @@ async function handleDecisionPreview(env: Env): Promise<Response> {
   const dynamicTruthByBucket = await loadDynamicTruthByBucket(env.DB);
 
   const result = runDecisionPipeline(observation, regime, portfolio, dynamicTruthByBucket, staticTruthByBucket);
+  const preview = buildPreviewResponse(result, observation, regime, portfolio, dynamicTruthByBucket, staticTruthByBucket);
 
-  return new Response(JSON.stringify(result), {
+  return new Response(JSON.stringify(preview), {
     headers: { 'content-type': 'application/json' }
   });
 }
