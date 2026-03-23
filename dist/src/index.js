@@ -1,6 +1,4 @@
 import { renderHelpText } from './interfaces/telegram_commands';
-import { runDecisionPipeline } from './pipeline/decision_pipeline';
-import { loadLatestObservationFrame, loadLatestRegimePosterior } from './pipeline/observation_regime_loader';
 async function handleRoot() {
     return new Response(JSON.stringify({ status: 'ok', system: 'alipay-otc-os-v3' }), {
         headers: { 'content-type': 'application/json' }
@@ -19,58 +17,6 @@ async function handleTelegramWebhook(request, env) {
     }
     return new Response(renderHelpText());
 }
-async function loadPortfolioState(env) {
-    const cashRow = await env.DB
-        .prepare('SELECT available_cash, pending_cash, reconciliation_status, as_of FROM portfolio_cash_ledger ORDER BY as_of DESC LIMIT 1')
-        .first();
-    if (cashRow === null || cashRow === undefined) {
-        throw new Error('MISSING_PORTFOLIO_CASH: no rows in portfolio_cash_ledger');
-    }
-    const posRows = await env.DB
-        .prepare('SELECT position_id, instrument_id, shares, cost_basis, buy_date, lot_ages_json, last_confirmed_trade_type, last_confirmed_trade_at FROM portfolio_positions_truth')
-        .all();
-    const positions = (posRows.results ?? []).map((p) => ({
-        position_id: p.position_id,
-        instrument_id: p.instrument_id,
-        shares: p.shares,
-        cost_basis: p.cost_basis,
-        buy_date: p.buy_date,
-        lot_ages: JSON.parse(p.lot_ages_json),
-        last_confirmed_trade_type: p.last_confirmed_trade_type,
-        last_confirmed_trade_at: p.last_confirmed_trade_at
-    }));
-    const pendingRows = await env.DB
-        .prepare("SELECT pending_trade_id, instrument_from, instrument_to, trade_state, submitted_at, expected_confirm_at, expected_cash_arrival_at, idempotency_key, manual_confirmation_required FROM portfolio_pending_trades WHERE trade_state NOT IN ('DONE', 'FAILED')")
-        .all();
-    const pending_trades = (pendingRows.results ?? []).map((t) => ({
-        pending_trade_id: t.pending_trade_id,
-        instrument_from: t.instrument_from,
-        instrument_to: t.instrument_to,
-        trade_state: t.trade_state,
-        submitted_at: t.submitted_at,
-        expected_confirm_at: t.expected_confirm_at,
-        expected_cash_arrival_at: t.expected_cash_arrival_at,
-        idempotency_key: t.idempotency_key,
-        manual_confirmation_required: Boolean(t.manual_confirmation_required)
-    }));
-    return {
-        as_of: cashRow.as_of,
-        positions,
-        pending_trades,
-        available_cash: cashRow.available_cash,
-        pending_cash: cashRow.pending_cash,
-        reconciliation_status: cashRow.reconciliation_status
-    };
-}
-async function handleDecisionPreview(env) {
-    const observation = await loadLatestObservationFrame(env.DB);
-    const regime = await loadLatestRegimePosterior(env.DB);
-    const portfolio = await loadPortfolioState(env);
-    const result = runDecisionPipeline(observation, regime, portfolio, {});
-    return new Response(JSON.stringify(result), {
-        headers: { 'content-type': 'application/json' }
-    });
-}
 export default {
     async fetch(request, env) {
         const url = new URL(request.url);
@@ -78,9 +24,6 @@ export default {
             return handleRoot();
         if (url.pathname === '/health')
             return handleHealth(env);
-        if (url.pathname === '/decision/preview' && request.method === 'GET') {
-            return handleDecisionPreview(env);
-        }
         if (url.pathname === '/webhook/telegram' && request.method === 'POST') {
             return handleTelegramWebhook(request, env);
         }
