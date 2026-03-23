@@ -1,5 +1,5 @@
 import type { D1Database } from '@cloudflare/workers-types';
-import type { ObservationFrame, RegimePosterior } from '../core/types/domain';
+import type { InstrumentDynamicTruth, ObservationFrame, RegimePosterior, TruthArbitrationStatus } from '../core/types/domain';
 
 interface ObsRow {
   observation_json: string;
@@ -167,4 +167,82 @@ export function strictParseRegimePosterior(raw: unknown): RegimePosterior {
     transition_matrix_1d: transition_matrix_1d as number[][],
     half_life_days: r['half_life_days'] as number
   };
+}
+
+interface DynamicTruthRow {
+  instrument_id: string;
+  as_of: string;
+  nav: number | null;
+  nav_date: string | null;
+  subscription_open: number | null;
+  redemption_open: number | null;
+  switch_in_allowed: number | null;
+  switch_out_allowed: number | null;
+  purchase_status_text: string | null;
+  redeem_status_text: string | null;
+  latest_status_checked_at: string | null;
+  latest_nav_checked_at: string | null;
+  truth_confidence: number;
+  truth_source: string;
+  truth_version: number;
+  arbitration_status: string;
+  asset_bucket: string;
+}
+
+/**
+ * Load the latest InstrumentDynamicTruth for each of the three canonical
+ * preview buckets (GOLD, CN_CORE, QDII).
+ *
+ * Returns only buckets that have a persisted row. Buckets with no row are
+ * absent from the result (not substituted or fabricated).
+ */
+export async function loadDynamicTruthByBucket(
+  db: D1Database
+): Promise<Partial<Record<'GOLD' | 'CN_CORE' | 'QDII', InstrumentDynamicTruth>>> {
+  const rows = await db
+    .prepare(`
+      SELECT d.instrument_id, d.as_of, d.nav, d.nav_date,
+             d.subscription_open, d.redemption_open,
+             d.switch_in_allowed, d.switch_out_allowed,
+             d.purchase_status_text, d.redeem_status_text,
+             d.latest_status_checked_at, d.latest_nav_checked_at,
+             d.truth_confidence, d.truth_source, d.truth_version,
+             d.arbitration_status, s.asset_bucket
+      FROM instrument_dynamic_truth d
+      JOIN instrument_static_truth s ON d.instrument_id = s.instrument_id
+      WHERE s.is_active = 1
+        AND s.asset_bucket IN ('GOLD', 'CN_CORE', 'QDII')
+        AND d.as_of = (
+          SELECT MAX(d2.as_of)
+          FROM instrument_dynamic_truth d2
+          WHERE d2.instrument_id = d.instrument_id
+        )
+    `)
+    .all<DynamicTruthRow>();
+
+  const result: Partial<Record<'GOLD' | 'CN_CORE' | 'QDII', InstrumentDynamicTruth>> = {};
+  for (const r of rows.results ?? []) {
+    const bucket = r.asset_bucket as 'GOLD' | 'CN_CORE' | 'QDII';
+    if (bucket !== 'GOLD' && bucket !== 'CN_CORE' && bucket !== 'QDII') continue;
+    if (result[bucket]) continue; // take first (latest) row per bucket
+    result[bucket] = {
+      instrument_id: r.instrument_id,
+      as_of: r.as_of,
+      nav: r.nav,
+      nav_date: r.nav_date,
+      subscription_open: r.subscription_open === null ? null : Boolean(r.subscription_open),
+      redemption_open: r.redemption_open === null ? null : Boolean(r.redemption_open),
+      switch_in_allowed: r.switch_in_allowed === null ? null : Boolean(r.switch_in_allowed),
+      switch_out_allowed: r.switch_out_allowed === null ? null : Boolean(r.switch_out_allowed),
+      purchase_status_text: r.purchase_status_text,
+      redeem_status_text: r.redeem_status_text,
+      latest_status_checked_at: r.latest_status_checked_at,
+      latest_nav_checked_at: r.latest_nav_checked_at,
+      truth_confidence: r.truth_confidence,
+      truth_source: r.truth_source,
+      truth_version: r.truth_version,
+      arbitration_status: r.arbitration_status as TruthArbitrationStatus
+    };
+  }
+  return result;
 }
