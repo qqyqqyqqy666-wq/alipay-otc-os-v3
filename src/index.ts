@@ -116,9 +116,18 @@ async function handleWriteObservationSnapshot(request: Request, env: Env): Promi
       headers: { 'content-type': 'application/json' }
     });
   }
-  const result = await writeObservationSnapshot(env.DB, body);
-  return new Response(JSON.stringify(result), {
-    status: result.written ? 201 : 200,
+  let obsResult;
+  try {
+    obsResult = await writeObservationSnapshot(env.DB, body);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return new Response(JSON.stringify({ error: message }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  return new Response(JSON.stringify(obsResult), {
+    status: obsResult.written ? 201 : 200,
     headers: { 'content-type': 'application/json' }
   });
 }
@@ -136,9 +145,18 @@ async function handleWriteRegimeSnapshot(request: Request, env: Env): Promise<Re
       headers: { 'content-type': 'application/json' }
     });
   }
-  const result = await writeRegimeSnapshot(env.DB, body);
-  return new Response(JSON.stringify(result), {
-    status: result.written ? 201 : 200,
+  let regimeResult;
+  try {
+    regimeResult = await writeRegimeSnapshot(env.DB, body);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return new Response(JSON.stringify({ error: message }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  return new Response(JSON.stringify(regimeResult), {
+    status: regimeResult.written ? 201 : 200,
     headers: { 'content-type': 'application/json' }
   });
 }
