@@ -1,6 +1,8 @@
 import type { Env } from './core/types/db';
 import type {
+  AssetBucket,
   EffectivePortfolioState,
+  InstrumentStaticTruth,
   PortfolioPositionTruth,
   PendingTradeState
 } from './core/types/domain';
@@ -161,12 +163,60 @@ async function handleWriteRegimeSnapshot(request: Request, env: Env): Promise<Re
   });
 }
 
+async function loadStaticTruthByBucket(env: Env): Promise<Partial<Record<'GOLD' | 'CN_CORE' | 'QDII', InstrumentStaticTruth>>> {
+  const rows = await env.DB
+    .prepare("SELECT instrument_id, fund_code, fund_name, asset_bucket, asset_subtype, fund_company, risk_level, currency, is_qdii, default_buy_confirm_days, default_redeem_confirm_days, default_cash_arrival_days, default_min_hold_days, default_fee_schedule_json, is_active FROM instrument_static_truth WHERE asset_bucket IN ('GOLD', 'CN_CORE', 'QDII') AND is_active = 1")
+    .all<{
+      instrument_id: string;
+      fund_code: string;
+      fund_name: string;
+      asset_bucket: string;
+      asset_subtype: string;
+      fund_company: string;
+      risk_level: string;
+      currency: string;
+      is_qdii: number;
+      default_buy_confirm_days: number;
+      default_redeem_confirm_days: number;
+      default_cash_arrival_days: number;
+      default_min_hold_days: number;
+      default_fee_schedule_json: string;
+      is_active: number;
+    }>();
+
+  const result: Partial<Record<'GOLD' | 'CN_CORE' | 'QDII', InstrumentStaticTruth>> = {};
+  for (const r of rows.results ?? []) {
+    const bucket = r.asset_bucket as AssetBucket;
+    if (bucket === 'GOLD' || bucket === 'CN_CORE' || bucket === 'QDII') {
+      result[bucket] = {
+        instrument_id: r.instrument_id,
+        fund_code: r.fund_code,
+        fund_name: r.fund_name,
+        asset_bucket: bucket,
+        asset_subtype: r.asset_subtype as InstrumentStaticTruth['asset_subtype'],
+        fund_company: r.fund_company,
+        risk_level: r.risk_level,
+        currency: r.currency,
+        is_qdii: Boolean(r.is_qdii),
+        default_buy_confirm_days: r.default_buy_confirm_days,
+        default_redeem_confirm_days: r.default_redeem_confirm_days,
+        default_cash_arrival_days: r.default_cash_arrival_days,
+        default_min_hold_days: r.default_min_hold_days,
+        default_fee_schedule_json: r.default_fee_schedule_json,
+        is_active: Boolean(r.is_active)
+      };
+    }
+  }
+  return result;
+}
+
 async function handleDecisionPreview(env: Env): Promise<Response> {
   const observation = await loadLatestObservationFrame(env.DB);
   const regime = await loadLatestRegimePosterior(env.DB);
   const portfolio = await loadPortfolioState(env);
+  const staticTruthByBucket = await loadStaticTruthByBucket(env);
 
-  const result = runDecisionPipeline(observation, regime, portfolio, {});
+  const result = runDecisionPipeline(observation, regime, portfolio, {}, staticTruthByBucket);
 
   return new Response(JSON.stringify(result), {
     headers: { 'content-type': 'application/json' }

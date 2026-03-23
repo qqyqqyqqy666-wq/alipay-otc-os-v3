@@ -3,6 +3,7 @@ import type {
   ExecutionPlan,
   ExposurePosterior,
   InstrumentDynamicTruth,
+  InstrumentStaticTruth,
   ObservationFrame,
   RegimePosterior,
   SignalCandidate
@@ -24,6 +25,7 @@ export function runDecisionPipeline(
   regime: RegimePosterior,
   portfolio: EffectivePortfolioState,
   dynamicTruthByBucket: Partial<Record<'GOLD' | 'CN_CORE' | 'QDII', InstrumentDynamicTruth | null>>,
+  staticTruthByBucket: Partial<Record<'GOLD' | 'CN_CORE' | 'QDII', InstrumentStaticTruth | null>>,
   exposure: ExposurePosterior | null = null
 ): DecisionPipelineResult {
   const signals = rankSignals([
@@ -33,12 +35,10 @@ export function runDecisionPipeline(
   ]);
 
   const plans = signals.map((signal) => {
-    const dynamicTruth = signal.bucket_id === 'GOLD'
-      ? dynamicTruthByBucket.GOLD ?? null
-      : signal.bucket_id === 'CN_CORE'
-        ? dynamicTruthByBucket.CN_CORE ?? null
-        : dynamicTruthByBucket.QDII ?? null;
-    const verdict = evaluateFriction(signal, portfolio, dynamicTruth);
+    const bucketKey = signal.bucket_id as 'GOLD' | 'CN_CORE' | 'QDII';
+    const dynamicTruth = dynamicTruthByBucket[bucketKey] ?? null;
+    const staticTruth = staticTruthByBucket[bucketKey] ?? null;
+    const verdict = evaluateFriction(signal, portfolio, dynamicTruth, staticTruth);
     return buildExecutionPlan(
       {
         bucketId: signal.bucket_id,
