@@ -76,6 +76,78 @@ function freshnessStatus(ageMin: number, thresholdMin: number): 'FRESH' | 'STALE
   return ageMin <= thresholdMin ? 'FRESH' : 'STALE';
 }
 
+// Precedence order for bucket health codes.
+// Index 0 = highest priority. determineBucketHealthCode applies these in order;
+// the first matching condition becomes the top_blocking_reason.
+export type PreviewHealthCode =
+  | 'MISSING_STATIC_TRUTH'     // 0 – can't evaluate fee/min-hold/channel at all
+  | 'MISSING_DYNAMIC_TRUTH'    // 1 – conservative channel block; no real subscription data
+  | 'STALE_OBSERVATION'        // 2 – global: market snapshot too old
+  | 'STALE_REGIME'             // 3 – global: regime posterior too old
+  | 'STALE_DYNAMIC_TRUTH'      // 4 – per-bucket: subscription/NAV status too old
+  | 'MANUAL_RECON_REQUIRED'    // 5 – portfolio recon must be resolved first
+  | 'BLOCKED_CHANNEL'          // 6 – real subscription/redemption window closed
+  | 'BLOCKED_STATUS_CONFLICT'  // 7 – truth arbitration conflict
+  | 'BLOCKED_MIN_HOLD'         // 8 – youngest lot below min-hold days
+  | 'BLOCKED_NEGATIVE_EDGE'    // 9 – net edge after all friction costs is <= 0
+  | 'ACTIONABLE';              // 10 – no blockers
+
+const HEALTH_CODE_PRECEDENCE: PreviewHealthCode[] = [
+  'MISSING_STATIC_TRUTH',
+  'MISSING_DYNAMIC_TRUTH',
+  'STALE_OBSERVATION',
+  'STALE_REGIME',
+  'STALE_DYNAMIC_TRUTH',
+  'MANUAL_RECON_REQUIRED',
+  'BLOCKED_CHANNEL',
+  'BLOCKED_STATUS_CONFLICT',
+  'BLOCKED_MIN_HOLD',
+  'BLOCKED_NEGATIVE_EDGE',
+  'ACTIONABLE'
+];
+
+const DEGRADED_CODES = new Set<PreviewHealthCode>([
+  'MISSING_STATIC_TRUTH',
+  'MISSING_DYNAMIC_TRUTH',
+  'STALE_OBSERVATION',
+  'STALE_REGIME',
+  'STALE_DYNAMIC_TRUTH'
+]);
+
+interface BucketHealthInput {
+  hasStaticTruth: boolean;
+  hasDynamicTruth: boolean;
+  observationStale: boolean;
+  regimeStale: boolean;
+  dynamicTruthStale: boolean;
+  reconRequired: boolean;
+  channelBlocked: boolean;
+  statusBlocked: boolean;
+  minHoldBlocked: boolean;
+  netEdge: number;
+}
+
+function determineBucketHealthCode(h: BucketHealthInput): PreviewHealthCode {
+  if (!h.hasStaticTruth) return 'MISSING_STATIC_TRUTH';
+  if (!h.hasDynamicTruth) return 'MISSING_DYNAMIC_TRUTH';
+  if (h.observationStale) return 'STALE_OBSERVATION';
+  if (h.regimeStale) return 'STALE_REGIME';
+  if (h.dynamicTruthStale) return 'STALE_DYNAMIC_TRUTH';
+  if (h.reconRequired) return 'MANUAL_RECON_REQUIRED';
+  if (h.channelBlocked) return 'BLOCKED_CHANNEL';
+  if (h.statusBlocked) return 'BLOCKED_STATUS_CONFLICT';
+  if (h.minHoldBlocked) return 'BLOCKED_MIN_HOLD';
+  if (h.netEdge <= 0) return 'BLOCKED_NEGATIVE_EDGE';
+  return 'ACTIONABLE';
+}
+
+function highestPriorityCode(codes: PreviewHealthCode[]): PreviewHealthCode {
+  for (const code of HEALTH_CODE_PRECEDENCE) {
+    if (codes.includes(code)) return code;
+  }
+  return 'ACTIONABLE';
+}
+
 export interface PreviewResponse {
   generated_at: string;
   inputs_summary: {
@@ -125,6 +197,20 @@ export interface PreviewResponse {
     regime: { as_of: string; age_minutes: number; threshold_minutes: number; status: 'FRESH' | 'STALE' };
     dynamic_truth_by_bucket: Partial<Record<PreviewBucket, { as_of: string; age_minutes: number; threshold_minutes: number; status: 'FRESH' | 'STALE' }>>;
     any_global_stale: boolean;
+  };
+  health_summary: {
+    global: {
+      is_actionable: boolean;
+      any_degraded: boolean;
+      any_blocked: boolean;
+      top_blocking_reason: PreviewHealthCode;
+    };
+    by_bucket: Array<{
+      bucket: string;
+      is_actionable: boolean;
+      is_degraded: boolean;
+      top_blocking_reason: PreviewHealthCode;
+    }>;
   };
 }
 
@@ -187,6 +273,28 @@ export function buildPreviewResponse(
 
   const obsStatus = freshnessStatus(obsAgeMin, OBSERVATION_STALE_MINUTES);
   const regimeStatus = freshnessStatus(regimeAgeMin, REGIME_STALE_MINUTES);
+  const reconRequired = portfolio.reconciliation_status === 'MANUAL_RECON_REQUIRED';
+
+  const bucketHealthEntries = result.signals.map((signal, i) => {
+    const bucket = signal.bucket_id as PreviewBucket;
+    const verdict = result.verdicts[i];
+    const code = determineBucketHealthCode({
+      hasStaticTruth: staticTruthByBucket[bucket] != null,
+      hasDynamicTruth: dynamicTruthByBucket[bucket] != null,
+      observationStale: obsStatus === 'STALE',
+      regimeStale: regimeStatus === 'STALE',
+      dynamicTruthStale: dynamicTruthFreshness[bucket]?.status === 'STALE',
+      reconRequired,
+      channelBlocked: verdict.channel_blocked,
+      statusBlocked: verdict.status_blocked,
+      minHoldBlocked: verdict.min_hold_blocked,
+      netEdge: verdict.net_edge_after_friction
+    });
+    return { bucket: signal.bucket_id, is_actionable: code === 'ACTIONABLE', is_degraded: DEGRADED_CODES.has(code), top_blocking_reason: code };
+  });
+
+  const allCodes = bucketHealthEntries.map((e) => e.top_blocking_reason);
+  const globalTopCode = highestPriorityCode(allCodes);
 
   return {
     generated_at: new Date().toISOString(),
@@ -236,6 +344,15 @@ export function buildPreviewResponse(
       },
       dynamic_truth_by_bucket: dynamicTruthFreshness,
       any_global_stale: obsStatus === 'STALE' || regimeStatus === 'STALE'
+    },
+    health_summary: {
+      global: {
+        is_actionable: globalTopCode === 'ACTIONABLE',
+        any_degraded: bucketHealthEntries.some((e) => e.is_degraded),
+        any_blocked: bucketHealthEntries.some((e) => !e.is_actionable && !e.is_degraded),
+        top_blocking_reason: globalTopCode
+      },
+      by_bucket: bucketHealthEntries
     }
   };
 }
