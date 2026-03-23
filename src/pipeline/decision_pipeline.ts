@@ -148,6 +148,8 @@ function highestPriorityCode(codes: PreviewHealthCode[]): PreviewHealthCode {
   return 'ACTIONABLE';
 }
 
+export type PreviewRecommendationStatus = 'ACTIONABLE' | 'HOLD' | 'DEGRADED' | 'BLOCKED';
+
 export interface PreviewResponse {
   generated_at: string;
   inputs_summary: {
@@ -211,6 +213,19 @@ export interface PreviewResponse {
       is_degraded: boolean;
       top_blocking_reason: PreviewHealthCode;
     }>;
+  };
+  // Single top-level conclusion. Callers should read this first.
+  primary_recommendation: {
+    // ACTIONABLE  – a real trade (BUY/REDEEM/SWITCH) is ready to submit
+    // HOLD        – no blockers, but highest-ranked plan says no trade now
+    // DEGRADED    – missing or stale inputs; conclusion is unreliable
+    // BLOCKED     – hard blocker (channel/status/min-hold/recon) prevents execution
+    status: PreviewRecommendationStatus;
+    selected_bucket: string | null;           // null when DEGRADED or BLOCKED
+    selected_action: string | null;           // ActionType | null
+    top_reason_code: PreviewHealthCode;       // always set; 'ACTIONABLE' when status is ACTIONABLE/HOLD
+    supporting_thesis_code: string | null;    // null when DEGRADED or BLOCKED
+    net_edge_after_friction: number | null;   // null when DEGRADED or BLOCKED
   };
 }
 
@@ -296,6 +311,34 @@ export function buildPreviewResponse(
   const allCodes = bucketHealthEntries.map((e) => e.top_blocking_reason);
   const globalTopCode = highestPriorityCode(allCodes);
 
+  // Primary recommendation: pick the first health-clear bucket (rankSignals order is preserved
+  // in result.signals), then classify by the plan's action_type.
+  const primaryIdx = bucketHealthEntries.findIndex((e) => e.is_actionable);
+  let primary_recommendation: PreviewResponse['primary_recommendation'];
+  if (primaryIdx !== -1) {
+    const plan = result.plans[primaryIdx];
+    const signal = result.signals[primaryIdx];
+    const verdict = result.verdicts[primaryIdx];
+    const isRealTrade = plan.action_type === 'BUY' || plan.action_type === 'REDEEM' || plan.action_type === 'SWITCH';
+    primary_recommendation = {
+      status: isRealTrade ? 'ACTIONABLE' : 'HOLD',
+      selected_bucket: signal.bucket_id,
+      selected_action: plan.action_type,
+      top_reason_code: 'ACTIONABLE',
+      supporting_thesis_code: signal.thesis_code,
+      net_edge_after_friction: verdict.net_edge_after_friction
+    };
+  } else {
+    primary_recommendation = {
+      status: DEGRADED_CODES.has(globalTopCode) ? 'DEGRADED' : 'BLOCKED',
+      selected_bucket: null,
+      selected_action: null,
+      top_reason_code: globalTopCode,
+      supporting_thesis_code: null,
+      net_edge_after_friction: null
+    };
+  }
+
   return {
     generated_at: new Date().toISOString(),
     inputs_summary: {
@@ -353,6 +396,7 @@ export function buildPreviewResponse(
         top_blocking_reason: globalTopCode
       },
       by_bucket: bucketHealthEntries
-    }
+    },
+    primary_recommendation
   };
 }
